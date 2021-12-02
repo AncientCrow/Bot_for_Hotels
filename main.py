@@ -1,11 +1,15 @@
 import datetime
 import os
 import sqlite3
-
 import telebot
 
-from functions.low_price import check_city, check_hotels, hotels_photo
-from functions.history import add_user, add_search_history_city, create_table, User
+from datetime import datetime, timedelta
+from database.database import add_user, add_search_history_city, create_table, User
+from functions.api_request import check_hotels, find_city
+from functions.best_deal import find_hotels_best
+from functions.high_price import find_hotels_high
+from functions.low_price import find_hotels_low
+from functions.photo_sender import find_photo
 from loguru import logger
 from telebot import types
 
@@ -41,8 +45,6 @@ def welcome_message(message: types.Message) -> None:
         bot.reply_to(message, output_message)
 
 
-
-
 @bot.message_handler(commands="help")
 def help_message(message: types.Message) -> None:
     """
@@ -67,7 +69,7 @@ def help_message(message: types.Message) -> None:
 @bot.message_handler(commands="lowprice")
 def low_price(message: types.Message) -> None:
     """
-        Функция отвечает за прием команды с последующим запросом города
+        Функция отвечает за прием команды lowprice с последующим запросом города
         и передачей информации в следующую функцию
 
         Parameters:
@@ -77,140 +79,237 @@ def low_price(message: types.Message) -> None:
                 Является классом библиотеки telebot
     """
 
-    city = bot.send_message(message.chat.id, "Введите название города для поиска отелей")
-    bot.register_next_step_handler(city, find_city)
+    bot.send_message(message.chat.id, "Введите название города для поиска отелей")
+    command = message.text
+    bot.register_next_step_handler(message, find_city, command)
 
 
-def find_city(message: types.Message) -> None:
+@bot.message_handler(commands="highprice")
+def high_price(message: types.Message) -> None:
     """
-    Функция отвечает за сбор информации об указанном пользователем городе.
+        Функция отвечает за прием команды highprice с последующим запросом города
+        и передачей информации в следующую функцию
 
-    Функция запрашивает у пользователя город поиска и количество выводимых отелей,
-    дополнительно будет запрашиваться разрешение на вывод изображений отеля
+        Parameters:
+        -------------
+            message : types.Message
+                Сообщение отправленное от пользователя, боту.
+                Является классом библиотеки telebot
+    """
+
+    bot.send_message(message.chat.id, "Введите название города для поиска отелей")
+    command = message.text
+    bot.register_next_step_handler(message, find_city, command)
+
+
+@bot.message_handler(commands="bestdeal")
+def best_deal(message: types.Message):
+    """
+            Функция отвечает за прием команды bestdeal с последующим запросом города
+            и передачей информации в следующую функцию
+
+            Parameters:
+            -------------
+                message : types.Message
+                    Сообщение отправленное от пользователя, боту.
+                    Является классом библиотеки telebot
+        """
+    bot.send_message(message.chat.id, "Введите название города для поиска отелей")
+    command = message.text
+    bot.register_next_step_handler(message, find_city, command)
+
+
+def price_range(message: types.Message, data: list, parameters: dict) -> None:
+    """
+    Функция принимает данные и проверяет корректность ввода пользователем данных о диапозоне цен
+    для поиска отелей
 
     Parameters:
     -------------
-        message : types.Message
-            Сообщение отправленное от пользователя боту, содержит название города.
-            Является классом библиотеки telebot
-    """
+        message: types.Message
+            Сообщение с диапозоном цен
 
-    url = "https://hotels4.p.rapidapi.com/locations/v2/search"
+        data : list
+            основные сведения необходимые для поиска отелей
+            data[0] - y|n ответ на вывод фотографий
+            data[1] - best название команды, требуется для записи в историю запросов
+            data[2] - число отелей для поиска
+            data[3] - id города в котором ищется отель
+
+        parameters : dict
+            установки для запроса в базу данных, передаются в следующую функцию
+    """
     try:
-        city_response = check_city(url, message.text)
-        if len(city_response) == 0:
+        price = message.text
+        prices = price
+        if prices.find(","):
+            prices = prices.replace(",", ".")
+            price = price.replace(",", ".")
+        prices = prices.split("-")
+        if float(prices[0]) > float(prices[1]):
             raise ValueError
         else:
-            cities_button = types.InlineKeyboardMarkup()
-            for city in city_response:
-                callback_data = city[1]
-                city_name = city[0]
-                new_button = types.InlineKeyboardButton(text=city_name, callback_data=callback_data)
-                cities_button.add(new_button)
-            bot.send_message(message.chat.id, "Выберите город:", reply_markup=cities_button)
-
+            data.append(price)
+            bot.send_message(message.chat.id, "Укажите диапозон расстояния отеля от центра города.\nПример: 1.5-4")
+            bot.register_next_step_handler(message, distance_range, data, parameters)
     except ValueError:
-        bot.send_message(message.chat.id, "В указаном городе нет отелей, либо такого города нет")
-        time = datetime.datetime.today().strftime('%Y-%m-%d-%H-%M')
-        logger.debug(f"{find_city.__name__}{time}: Hotels not found ")
+        bot.send_message(message.chat.id, "Указано неверное значение диапозона цен, повторите ввод")
+        bot.register_next_step_handler(message, price_range, data, parameters)
 
 
-def find_hotels(message: types.Message, destination: str, error=False):
+def distance_range(message: types.Message, data: list, parameters: dict):
     """
-    Функция отвечает за принятие количества отелей и id места назначения(города)
-    Запрос по отелям производится с платы за 1 день проживания
+        Функция принимает данные и проверяет корректность ввода этих данных о диапозоне
+        дистанции для поиска отелей с последующим выводом ответа для пользователя
 
-    Parameters:
-    -------------
-        message : types.Message
-            сообщение о количестве отелей
+        Parameters:
+        -------------
+            message: types.Message
+                Сообщение с диапозоном цен
 
-        destination : str
-            текстовая информация об уникальном id города, в котором ищется отель
-    """
+            data : list
+                основные сведения необходимые для поиска отелей
+                data[0] - y|n ответ на вывод фотографий
+                data[1] - best название команды, требуется для записи в историю запросов
+                data[2] - число отелей для вывода
+                data[3] - id города в котором ищется отель
+                data[4] - диапозон стоимости дня проживания
+
+            parameters : dict
+                установки для запроса в базу данных, передаются в следующую функцию
+        """
     try:
-        hotels_count = message.text
-        if hotels_count.isalpha() and error is False:
-            if int(hotels_count) > 10:
-                hotels_count = "10"
-        elif error:
-            hotels_count = "5"
+        distance = message.text
+        if distance.find(","):
+            distance = distance.replace(",", ".")
+        distance = distance.split("-")
+        min_distance = float(distance[0])
+        max_distance = float(distance[1])
+        prices = data[4]
+        prices = prices.split("-")
+        min_price = float(prices[0])
+        max_price = float(prices[1])
+        parameters["priceMin"] = min_price
+        parameters["priceMax"] = max_price
+        result = check_hotels(parameters)
 
-        buttons = types.InlineKeyboardMarkup()
-        button_yes = types.InlineKeyboardButton(text='Да!', callback_data=f'y|{hotels_count}|{destination}')
-        button_no = types.InlineKeyboardButton(text='Нет =(', callback_data=f'n|{hotels_count}|{destination}')
-        buttons.add(button_yes, button_no)
-        bot.send_message(message.chat.id, "Произвести вывод фотографий отелей?", reply_markup=buttons)
+        if not result:
+            raise NameError("Отели не найдены")
+
+        hotel_count = int(data[2])
+        keys = set([key for key in result.keys()])
+        for key in keys:
+            hotel_distance = result[key][2]["distance"].split(" ")
+            hotel_distance = hotel_distance[0].replace(",", ".")
+            hotel_distance = float(hotel_distance)
+            hotel_price = result[key][2]["cur_price"]
+            if min_distance > hotel_distance or hotel_distance > max_distance:
+                del result[key]
+            elif min_price > hotel_price or max_price < hotel_price:
+                del result[key]
+
+        while len(result.keys()) > hotel_count:
+            new_keys = [key for key in result.keys()]
+            del result[new_keys[-1]]
+            new_keys.pop(-1)
+
+        if len(result.keys()) < hotel_count:
+            bot.send_message(message.chat.id, "Отелей нашлось меньше чем надо =(")
+
+        if data[0] == "y":
+            output_message = bot.send_message(message.chat.id, "Сколько фотографий вывести")
+            bot.register_next_step_handler(output_message, find_photo, result)
+        elif data[0] == "n":
+            output_message = ""
+            for index in result.keys():
+                output_message += result[index][0] + "\n"
+            bot.send_message(message.chat.id, output_message)
+
+        history_hotels = []
+        for value in result.values():
+            history_hotels.append(value[2])
+        add_search_history_city(message.chat.id, "/bestdeal", history_hotels)
     except ValueError:
-        bot.send_message(message.chat.id, "Введено не число, будет введено базовое значение отелей")
-        time = datetime.datetime.today().strftime('%Y-%m-%d-%H-%M')
-        logger.debug(f"{time}: User input data is not number(hotels)")
-        find_hotels(message, destination, error=True)
-
-
-def find_photo(message: types.Message or int, hotels: tuple, error=False):
-    """
-    Функция отвечает за создание сообщения для пользователя с выводом фотографий
-
-    Parameters:
-    --------------
-        message : types.Message
-            сообщение с количеством фотографий на вывод
-    """
-    try:
-        if error:
-            photo_count = 5
-        else:
-            photo_count = int(message.text)
-        hotels_list = hotels[0]
-        hotels_id = hotels[1]
-        photos = []
-
-        for index, hotel in enumerate(hotels_list):
-            querystring = {"id": {hotels_id[index]}}
-            photos.append(hotels_photo(querystring, hotel, photo_count))
-        for elements in photos:
-            bot.send_media_group(message.chat.id, media=elements)
-    except ValueError:
-        text = bot.send_message(message.chat.id, "Указано не число, будет выведено базовое значение фотографий")
-        time = datetime.datetime.today().strftime('%Y-%m-%d-%H-%M')
-        logger.debug(f"{time}: User input data is not number(photos)")
-        find_photo(text, hotels, error=True)
+        bot.send_message(message.chat.id, "Указано неверное значение дистанции, повторите ввод")
+        bot.register_next_step_handler(message, distance_range, data, parameters)
+    except NameError:
+        bot.send_message(message.chat.id, f"Отели в городе не найдены. Введите новый запрос /bestdeal")
 
 
 @bot.callback_query_handler(func=lambda call: call.data[0] in ["y", "n"])
 def callback_photo(call: types.CallbackQuery) -> None:
     """Callback функция, обрабатывает нажатие на кнопки, касающиеся вывода фотографий"""
     try:
+        check_in = datetime.today().strftime('%Y-%m-%d')
+        check_out = (datetime.today() + timedelta(days=1)).strftime('%Y-%m-%d')
         data = call.data.split("|")
-        result = check_hotels(data[1], data[2])
-        hotels = result[0]
-        add_search_history_city(call.message.chat.id, result[2])
+        destination = data[3]
+        hotels_count = data[2]
+
+        parameters = {"destinationId": destination, "pageNumber": "1", "pageSize": hotels_count,
+                      "checkIn": check_in,
+                      "checkOut": check_out,
+                      "adults1": "1",
+                      "priceMin": None,
+                      "priceMax": None,
+                      "sortOrder": None,
+                      "locale": "ru_RU",
+                      "currency": "RUB"}
+
+        if data[1] == "low":
+            parameters["sortOrder"] = "PRICE"
+            result = check_hotels(parameters)
+            command = "/lowprice"
+        elif data[1] == "high":
+            parameters["sortOrder"] = "PRICE_HIGHEST_FIRST"
+            result = check_hotels(parameters)
+            command = "/highprice"
+        elif data[1] == "best":
+            parameters["sortOrder"] = "PRICE"
+            parameters["pageSize"] = 25
+            message = bot.send_message(call.message.chat.id, "Введите диапозон цен формата X-Y")
+            bot.register_next_step_handler(message, price_range, data, parameters)
+            return None
+
+        if not result:
+            raise NameError("Отели не найдены")
+
         if data[0] == "y":
-            if len(hotels) == 0:
-                raise ValueError("Отели не найдены")
             message = bot.send_message(call.message.chat.id, "Сколько фотографий вывести")
             bot.register_next_step_handler(message, find_photo, result)
         elif data[0] == "n":
-            message = ""
-            if len(result[0]) == 0:
-                raise ValueError("Отели не найдены")
-            else:
-                for hotel in hotels:
-                    message += hotel + "\n"
-                bot.send_message(call.message.chat.id, message)
-    except ValueError:
-        bot.send_message(call.message.chat.id, "Отели в городе не найдены. Введите новый город /lowprice")
-        time = datetime.datetime.today().strftime('%Y-%m-%d-%H-%M')
+            output_message = ""
+            for index in result.keys():
+                output_message += result[index][0] + "\n"
+            bot.send_message(call.message.chat.id, output_message)
+
+        history_hotels = []
+        for value in result.values():
+            history_hotels.append(value[2])
+        add_search_history_city(call.message.chat.id, command, history_hotels)
+    except NameError:
+        bot.send_message(call.message.chat.id, f"Отели в городе не найдены. Введите новый запрос {command}")
+        time = datetime.today().strftime('%Y-%m-%d-%H-%M')
         logger.debug(f"{time}: Hotels not found")
+    except TimeoutError:
+        bot.send_message(call.message.chat.id, "Сервер не даёт ответа, возможно он сломался. Повторите позже")
+        time = datetime.today().strftime('%Y-%m-%d-%H-%M')
+        logger.debug(f"{time}: Server didn't respond, bad request")
 
 
 @bot.callback_query_handler(func=lambda call: call.data)
 def callback(call: types.CallbackQuery):
     """Callback функция, обрабатывает нажатие на кнопки касающееся вывода города"""
-    id_city = call.data
+    data = call.data.split("|")
+    id_city = data[0]
+    command = data[1]
     bot.send_message(call.message.chat.id, "Сколько вывести отелей? Максимум 10")
-    bot.register_next_step_handler(call.message, find_hotels, id_city)
+    if command == "low":
+        bot.register_next_step_handler(call.message, find_hotels_low, id_city)
+    elif command == "high":
+        bot.register_next_step_handler(call.message, find_hotels_high, id_city)
+    elif command == "best":
+        bot.register_next_step_handler(call.message, find_hotels_best, id_city)
 
 
 @bot.message_handler(func=lambda m: True)

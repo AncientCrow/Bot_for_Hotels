@@ -23,10 +23,10 @@ def create_table() -> None:
         """)
     cursor.execute("""CREATE TABLE IF NOT EXISTS history(
                     user_id INT,
+                    command TEXT,
                     date TEXT,
                     city TEXT,
-                    hotels TEXT)
-                    
+                    hotels TEXT)  
             """)
     conn.commit()
 
@@ -71,7 +71,7 @@ def get_user(user_id: str) -> tuple:
     return record
 
 
-def add_search_history_city(user_id, hotels: list[dict]) -> None:
+def add_search_history_city(user_id: int, command: str, hotels: list[dict]) -> None:
     """
     Функция отвечает за добавление истории запросов пользователя формата
      id Y-m-d-H:M, город, отели/
@@ -79,7 +79,7 @@ def add_search_history_city(user_id, hotels: list[dict]) -> None:
     conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
     date = datetime.today().strftime('%Y-%m-%d-%H:%M')
-    user_info = [user_id, date]
+    user_info = [user_id, command, date]
     hotels_add = []
     for number, hotel in enumerate(hotels):
         if number == 0:
@@ -87,5 +87,5 @@ def add_search_history_city(user_id, hotels: list[dict]) -> None:
         hotels_add.append(hotel['name'])
     hotels_add = ", ".join(hotels_add)
     user_info.append(hotels_add)
-    cursor.execute("INSERT INTO history VALUES(?,?,?,?);", user_info)
+    cursor.execute("INSERT INTO history VALUES(?,?,?,?,?);", user_info)
     conn.commit()
