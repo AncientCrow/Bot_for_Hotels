@@ -1,0 +1,24 @@
+
+    {
+        "parameters_casual": {
+            "destinationId": null,
+            "pageNumber": "1",
+            "pageSize": null,
+            "checkIn": null,
+            "checkOut": null,
+            "adults1": "1",
+            "priceMin": null,
+            "priceMax": null,
+            "sortOrder": null,
+            "locale": "ru_RU",
+            "currency": "RUB"
+        },
+        "parameters_city": {
+            "query": null,
+            "locale": "ru_RU",
+            "currency": "RUB"
+        },
+        "url_city": "https://hotels4.p.rapidapi.com/locations/v2/search",
+        "url_hotel": "https://hotels4.p.rapidapi.com/properties/list",
+        "url_photo": "https://hotels4.p.rapidapi.com/properties/get-hotel-photos"
+    }

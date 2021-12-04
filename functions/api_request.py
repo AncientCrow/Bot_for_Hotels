@@ -2,25 +2,25 @@ import json
 import os
 import re
 import requests
-import telebot
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from loguru import logger
 from telebot import types
 from telebot.types import InputMediaPhoto
 
-bot_token = os.getenv("BOT_TOKEN")
-api_token = os.getenv("API_TOKEN")
-bot = telebot.TeleBot(bot_token, parse_mode=None)
+with open("config.json", "r") as file:
+    url_and_parameters = json.load(file)
 
+api_token = os.getenv("API_TOKEN")
 headers = {
     'x-rapidapi-host': "hotels4.p.rapidapi.com",
     'x-rapidapi-key': api_token
 }
+
 logger.add("logging.log")
 
 
-def find_city(message: types.Message, command: str) -> None:
+def find_city(message: types.Message, command: str) -> types.InlineKeyboardMarkup or tuple[bool, str]:
     """
     Функция отвечает за сбор информации об указанном пользователем городе.
 
@@ -33,7 +33,7 @@ def find_city(message: types.Message, command: str) -> None:
             Является классом библиотеки telebot
     """
 
-    url = "https://hotels4.p.rapidapi.com/locations/v2/search"
+    url = url_and_parameters["url_city"]
     try:
         city_response = check_city(url, message.text)
         if len(city_response) == 0:
@@ -47,15 +47,45 @@ def find_city(message: types.Message, command: str) -> None:
                     callback_data = f"{city[1]}|high"
                 elif command == "/bestdeal":
                     callback_data = f"{city[1]}|best"
-
                 city_name = city[0]
                 new_button = types.InlineKeyboardButton(text=city_name, callback_data=callback_data)
                 cities_button.add(new_button)
-            bot.send_message(message.chat.id, "Выберите город:", reply_markup=cities_button)
+            return cities_button
     except ValueError:
-
         text = f"В указаном городе нет отелей, либо такого города нет. Введите новый город {command}"
-        bot.send_message(message.chat.id, text)
+        return False, text
+
+
+def find_hotels(message: types.Message, destination: str, command: str, error=False):
+    """
+        Функция отвечает за принятие количества отелей и id места назначения(города)
+        Запрос по отелям производится с платы за 1 день проживания по убыванию цены
+
+        Parameters:
+        -------------
+            message : types.Message
+                сообщение о количестве отелей
+
+            destination : str
+                текстовая информация об уникальном id города, в котором ищется отель
+        """
+    try:
+        hotels_count = message.text
+        if hotels_count.isalpha() and error is False:
+            if int(hotels_count) > 10:
+                hotels_count = "10"
+        elif error:
+            hotels_count = "5"
+
+        buttons = types.InlineKeyboardMarkup()
+        button_yes = types.InlineKeyboardButton(text='Да!', callback_data=f'y|{command}|{hotels_count}|{destination}')
+        button_no = types.InlineKeyboardButton(text='Нет =(', callback_data=f'n|{command}|{hotels_count}|{destination}')
+        buttons.add(button_yes, button_no)
+        return buttons
+    except ValueError:
+        time = datetime.today().strftime('%Y-%m-%d-%H-%M')
+        logger.debug(f"{time}: User input data is not number(hotels)")
+        return False
 
 
 def check_city(url: str, city: str) -> dict or tuple:
@@ -77,7 +107,8 @@ def check_city(url: str, city: str) -> dict or tuple:
 
     """
 
-    parameters = {"query": city, "locale": "ru_RU", "currency": "RUB"}
+    parameters = url_and_parameters["parameters_city"]
+    parameters["query"] = city
     response = requests.request("GET", url,
                                 headers=headers,
                                 params=parameters,
@@ -119,12 +150,12 @@ def check_hotels(parameters: dict) -> dict or bool:
         Если произошла ошибка TimeoutError то возвращается False
     """
     try:
-        url = "https://hotels4.p.rapidapi.com/properties/list"
+        url = url_and_parameters["url_hotel"]
         response = requests.request("GET", url,
                                     headers=headers,
                                     params=parameters,
                                     timeout=15)
-        find_hotels = []
+        find_hotel = []
         data = json.loads(response.text)
 
         for elements in data["data"].get("body").get("searchResults").get("results"):
@@ -139,14 +170,14 @@ def check_hotels(parameters: dict) -> dict or bool:
             hotels_info["distance"] = elements.get("landmarks")[0].get("distance")
             hotels_info["price"] = elements.get("ratePlan").get("price").get("current")
             hotels_info["cur_price"] = elements.get("ratePlan").get("price").get("exactCurrent")
-            find_hotels.append(hotels_info)
+            find_hotel.append(hotels_info)
 
-        hotel_output = send_message(find_hotels)
+        hotel_output = send_message(find_hotel)
         output_message = hotel_output[0]
         hotel_id = hotel_output[1]
         result = {key: None for key, _ in enumerate(output_message)}
         for key in result.keys():
-            result[key] = [output_message[key], hotel_id[key], find_hotels[key]]
+            result[key] = [output_message[key], hotel_id[key], find_hotel[key]]
         return result
     except requests.exceptions.ReadTimeout:
         return False

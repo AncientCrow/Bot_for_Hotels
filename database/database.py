@@ -35,6 +35,11 @@ def add_user(user: User) -> None:
     """
     Добавляет пользователя в таблицу при выполнения условия,
     если условие не выполняется, то ничего не происходит
+
+    Parameters:
+    -------------
+        user : User
+            класс пользователя, хранит в себе id и имя пользователя
     """
 
     conn = sqlite3.connect("database.db")
@@ -48,34 +53,23 @@ def add_user(user: User) -> None:
         conn.commit()
 
 
-def get_user(user_id: str) -> tuple:
-    """
-    Функция отвечает за получение id пользователя и будет использоваться в функции,
-    отвечающей за выдачу истории запросов у бота
-
-    Parameters:
-    -------------
-        user_id : str
-            id пользователя, который будет искаться в базе данных SQL
-
-    Returns:
-    ---------
-        record : tuple[int]
-            кортеж состоящий из одного элемента - id пользователя.
-            потребуется в выводе историй запросов пользователя
-    """
-    conn = sqlite3.connect("database.db")
-    cursor = conn.cursor()
-    cursor.execute(f"SELECT user_id FROM history WHERE user_id = {user_id}")
-    record = cursor.fetchone()
-    return record
-
-
 def add_search_history_city(user_id: int, command: str, hotels: list[dict]) -> None:
     """
     Функция отвечает за добавление истории запросов пользователя формата
-     id Y-m-d-H:M, город, отели/
+    id Y-m-d-H:M, город, отели/
+
+     Parameters:
+     -------------
+        user_id : int
+            id пользователя для добавления в базу данных
+
+        command : str
+            команда, которая была использована пользователем
+
+        hotels : list[dict]
+            список содержащий внутри себя словарь с данными об отелях
     """
+
     conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
     date = datetime.today().strftime('%Y-%m-%d-%H:%M')
@@ -89,3 +83,44 @@ def add_search_history_city(user_id: int, command: str, hotels: list[dict]) -> N
     user_info.append(hotels_add)
     cursor.execute("INSERT INTO history VALUES(?,?,?,?,?);", user_info)
     conn.commit()
+
+
+def get_history(user_id: int) -> tuple:
+    """
+    Функция принимающая id пользователя и выводящая 3 последних запроса пользователя
+    если в базе данных нет информации о запросах пользователя то возвращается false,
+    если в базе меньше 3 запросов пользователя то будет произведён вывод меньшего числа запросов
+
+    Parameters:
+    -------------
+        user_id : int
+            id пользователя для поиска в базе данных
+    """
+
+    try:
+        connect = sqlite3.connect('database.db')
+        with connect:
+            cursor = connect.cursor()
+            sql_text = "SELECT * FROM history WHERE user_id = ?"
+            cursor.execute(sql_text, (user_id,))
+            rows = cursor.fetchall()
+
+            if len(rows) == 0:
+                raise ValueError
+            rows = rows[::-1]
+
+            message = ""
+            for row in rows[:3]:
+                time = row[2]
+                command = row[1]
+                city = row[3]
+                hotels = row[4].split(", ")
+                hotel_message = ""
+                history_count = len(hotels)
+                for hotel in hotels:
+                    hotel_message += f"{hotel}\n"
+
+                message += f"\nВремя запроса: {time}\nКоманда: {command}\nГород: {city}\nОтели:\n{hotel_message}\n"
+        return message, history_count
+    except ValueError:
+        return False, 0
