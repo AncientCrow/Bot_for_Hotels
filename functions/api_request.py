@@ -9,9 +9,9 @@ from datetime import datetime
 from loguru import logger
 from telebot import types
 from telebot.types import InputMediaPhoto
+from urls_and_param import urls
 
-with open("config.json", "r") as file:
-    url_and_parameters = json.load(file)
+url_and_parameters = urls
 
 api_token = os.getenv("API_TOKEN")
 headers = {

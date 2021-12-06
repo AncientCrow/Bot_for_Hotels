@@ -2,10 +2,10 @@ import json
 import os
 import requests
 
+from urls_and_param import urls
 from telebot.types import InputMediaPhoto
 
-with open("config.json", "r") as file:
-    url_and_parameters = json.load(file)
+url_and_parameters = urls
 
 api_token = os.getenv("API_TOKEN")
 headers = {
@@ -71,4 +71,3 @@ def hotels_photo(parameters: dict, text: str, photo_count: int) -> list:
             else:
                 photo_list.append(InputMediaPhoto(media=image_url))
     return photo_list
-

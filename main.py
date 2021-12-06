@@ -1,9 +1,9 @@
 import datetime
-import json
 import os
 import sqlite3
 import telebot
 
+from urls_and_param import urls
 from datetime import datetime, timedelta
 from database.database import add_user, add_search_history_city, create_table, get_history, User
 from functions.api_request import check_hotels, find_city, find_hotels
@@ -14,8 +14,7 @@ from telebot import types
 logger.add("logging.log")
 bot_token = os.getenv("BOT_TOKEN")
 bot = telebot.TeleBot(bot_token, parse_mode=None)
-with open("config.json", "r") as file:
-    url_and_parameters = json.load(file)
+url_and_parameters = urls
 
 
 @bot.message_handler(commands=["hello-world", "hello_world", "start"])
