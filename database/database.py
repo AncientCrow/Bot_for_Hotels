@@ -1,5 +1,6 @@
 import sqlite3
 from datetime import datetime
+from typing import List
 
 
 class User:
@@ -53,7 +54,7 @@ def add_user(user: User) -> None:
         conn.commit()
 
 
-def add_search_history_city(user_id: int, command: str, hotels: list[dict]) -> None:
+def add_search_history_city(user_id: int, command: str, hotels: List[dict]) -> None:
     """
     Функция отвечает за добавление истории запросов пользователя формата
     id Y-m-d-H:M, город, отели/

@@ -1,6 +1,8 @@
 import json
 import os
 import re
+from typing import List, Tuple
+
 import requests
 
 from datetime import datetime
@@ -20,7 +22,7 @@ headers = {
 logger.add("logging.log")
 
 
-def find_city(message: types.Message, command: str) -> types.InlineKeyboardMarkup or tuple[bool, str]:
+def find_city(message: types.Message, command: str) -> types.InlineKeyboardMarkup or Tuple[bool, str]:
     """
     Функция отвечает за сбор информации об указанном пользователем городе.
 
@@ -226,7 +228,7 @@ def hotels_photo(parameters: dict, text: str, photo_count: int) -> list:
     return photo_list
 
 
-def send_message(hotels: list[dict]) -> tuple:
+def send_message(hotels: List[dict]) -> tuple:
     """
     Функция отвечает за составление текста сообщения с последующей передачей кортежа,
     содержащего список отелей с описанием отелей и список c id каждого отеля
