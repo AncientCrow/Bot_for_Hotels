@@ -1,8 +1,8 @@
 import datetime
-import os
 import sqlite3
 import telebot
 
+from config import BOT_TOKEN
 from urls_and_param import urls
 from datetime import datetime, timedelta
 from database.database import add_user, add_search_history_city, create_table, get_history, User
@@ -12,8 +12,7 @@ from loguru import logger
 from telebot import types
 
 logger.add("logging.log")
-bot_token = os.getenv("BOT_TOKEN")
-bot = telebot.TeleBot(bot_token, parse_mode=None)
+bot = telebot.TeleBot(BOT_TOKEN, parse_mode=None)
 url_and_parameters = urls
 
 

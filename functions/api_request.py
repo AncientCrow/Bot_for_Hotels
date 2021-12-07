@@ -9,14 +9,15 @@ from datetime import datetime
 from loguru import logger
 from telebot import types
 from telebot.types import InputMediaPhoto
+
+from config import API_TOKEN
 from urls_and_param import urls
 
 url_and_parameters = urls
 
-api_token = os.getenv("API_TOKEN")
 headers = {
     'x-rapidapi-host': "hotels4.p.rapidapi.com",
-    'x-rapidapi-key': api_token
+    'x-rapidapi-key': API_TOKEN
 }
 
 logger.add("logging.log")

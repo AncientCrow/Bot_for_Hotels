@@ -1,16 +1,15 @@
 import json
-import os
 import requests
 
+from config import API_TOKEN
 from urls_and_param import urls
 from telebot.types import InputMediaPhoto
 
 url_and_parameters = urls
 
-api_token = os.getenv("API_TOKEN")
 headers = {
     'x-rapidapi-host': "hotels4.p.rapidapi.com",
-    'x-rapidapi-key': api_token
+    'x-rapidapi-key': API_TOKEN
 }
 
 
