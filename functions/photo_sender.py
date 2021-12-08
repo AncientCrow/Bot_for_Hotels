@@ -54,8 +54,7 @@ def hotels_photo(parameters: dict, text: str, photo_count: int) -> list:
             список содержащий в себе объекты InputMediaPhoto, в последующем будет передан,
             для вывода сообщений с фотографиями отеля
     """
-    if photo_count > 10:
-        photo_count = 10
+
     url = url_and_parameters["url_photo"]
     response = requests.request("GET", url, headers=headers, params=parameters)
     data = json.loads(response.text)

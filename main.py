@@ -3,15 +3,17 @@ import sqlite3
 import telebot
 
 from config import BOT_TOKEN
-from urls_and_param import urls
 from datetime import datetime, timedelta
-from database.database import add_user, add_search_history_city, create_table, get_history, User
+from database.database import add_user, add_search_history_city, get_dates
+from database.database import create_table, get_history, check_dates, update_dates
 from functions.api_request import check_hotels, find_city, find_hotels
 from functions.photo_sender import find_photo
 from loguru import logger
 from telebot import types
+from telegram_bot_calendar import DetailedTelegramCalendar, LSTEP
+from urls_and_param import urls
 
-logger.add("logging.log")
+logger.add("logging.log", encoding="utf-8")
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode=None)
 url_and_parameters = urls
 
@@ -32,16 +34,16 @@ def welcome_message(message: types.Message) -> None:
 
     user_id = message.chat.id
     user_name = f"{message.from_user.first_name} {message.from_user.last_name}"
-    user = User(user_id, user_name)
     try:
-        add_user(user)
+        add_user(user_id, user_name)
     except sqlite3.OperationalError:
         create_table()
-        add_user(user)
+        add_user(user_id, user_name)
     finally:
         output_message = "Добро пожаловать, я бот который поможет найти отель по тем или иным условиям.\n" \
                          "Используйте /help, чтобы узнать, что я умею"
         bot.reply_to(message, output_message)
+        logger.success(f"Юзер №{message.chat.id} получил приветственное сообщение")
 
 
 @bot.message_handler(commands="help")
@@ -63,6 +65,7 @@ def help_message(message: types.Message) -> None:
                      "/bestdeal - вывод наиболее подходящих отелей по заданым параметрам\n" \
                      "/history - вывод информации о ранее введеных запросах"
     bot.reply_to(message, output_message)
+    logger.success(f"Юзер №{message.chat.id} использовал команду /help")
 
 
 @bot.message_handler(commands="lowprice")
@@ -80,6 +83,7 @@ def low_price(message: types.Message) -> None:
 
     bot.send_message(message.chat.id, "Введите название города для поиска отелей")
     command = message.text
+    logger.success(f"Юзер №{message.chat.id} использовал команду /lowprice")
     bot.register_next_step_handler(message, city, command)
 
 
@@ -98,6 +102,7 @@ def high_price(message: types.Message) -> None:
 
     bot.send_message(message.chat.id, "Введите название города для поиска отелей")
     command = message.text
+    logger.success(f"Юзер №{message.chat.id} использовал команду /highprice")
     bot.register_next_step_handler(message, city, command)
 
 
@@ -116,6 +121,7 @@ def best_deal(message: types.Message):
 
     bot.send_message(message.chat.id, "Введите название города для поиска отелей")
     command = message.text
+    logger.success(f"Юзер №{message.chat.id} использовал команду /bestdeal")
     bot.register_next_step_handler(message, city, command)
 
 
@@ -134,16 +140,115 @@ def history(message: types.Message) -> None:
     if result[1] == 0:
         text = "В базе данных нет ваших запросов, сначала стоит поискать что-то"
         bot.send_message(message.chat.id, text)
-        logger.debug("history without user's info(data not found)")
+        logger.success(f"Команда /history выполнена, но у Юзера №{message.chat.id} нет истории запросов")
     elif 0 < result[1] < 3:
         text = "В базе данных  недостаточно ваших запросов, будет выведено меньше 3 запросов"
         bot.send_message(message.chat.id, text)
         bot.send_message(message.chat.id, result[0])
+        logger.success(f"Команда /history выполнена, но у Юзера №{message.chat.id} меньше 3 запросов")
+
     else:
         bot.send_message(message.chat.id, result[0])
+        logger.success(f"Команда /history от Юзера №{message.chat.id} выполнена")
 
 
-def price_range(message: types.Message, data: list, parameters: dict) -> None:
+def dates(message: types.Message):
+    """
+    Промежуточная функция, создаёт календарь для выбора даты въезда
+
+    Parameters:
+    -------------
+        message : types.Message
+            сообщение пользователя, требуется для отправки календаря по id пользователя
+    """
+
+    calendar, step = DetailedTelegramCalendar().build()
+    bot.send_message(message.chat.id,
+                     f"Выберите дату въезда",
+                     reply_markup=calendar)
+    logger.success(f"Юзеру №{message.chat.id} отправлен календарь въезда")
+
+
+def send_date(message: types.Message):
+    """
+    Функция отвечающая за проверку введеных дат въезда и выезда пользователя
+    с последующим форматированием данных для запроса
+    Если команда пользователя /lowprice или /highprice, то после форматирования дат
+    происходит переход к поиску отелей по заданным параметрам
+    Если команда пользователя /bestdeal то после форматирования дат, происходит запрос
+    диапозона цен и выполнени последующих команд
+
+    Parameters:
+    -------------
+        message : types.Message
+            сообщение от пользователя содержащее информацию об id чата
+    """
+    try:
+        parameters = url_and_parameters["parameters_casual"]
+        user_dates = get_dates(message.chat.id)
+        check_in = datetime.strptime(user_dates[0], "%Y-%m-%d")
+        check_out = datetime.strptime(user_dates[1], "%Y-%m-%d")
+        day_difference = (check_out - check_in).days
+
+        if day_difference > 28:
+            text = "Забронировать можно не более чем на 28 дней, произведу расчет на 28 дней"
+            bot.send_message(message.chat.id, text)
+            parameters["checkIn"] = check_in.strftime("%Y-%m-%d")
+            parameters["checkOut"] = (check_in + timedelta(28)).strftime("%Y-%m-%d")
+            logger.warning(f"Юзер №{message.chat.id} превысил максимальный срок бронирования")
+        else:
+            parameters["checkIn"] = check_in.strftime("%Y-%m-%d")
+            parameters["checkOut"] = check_out.strftime("%Y-%m-%d")
+
+        update_dates(message.chat.id, 1, 1)
+        command = url_and_parameters["command"]
+        photo_answer = url_and_parameters["photo"]
+        hotel_count = int(url_and_parameters["hotel_count"])
+        if command == "low":
+            parameters["sortOrder"] = "PRICE"
+            result = check_hotels(parameters)
+            command = "/lowprice"
+        elif command == "high":
+            parameters["sortOrder"] = "PRICE_HIGHEST_FIRST"
+            result = check_hotels(parameters)
+            command = "/highprice"
+        elif command == "best":
+            parameters["sortOrder"] = "PRICE"
+            parameters["pageSize"] = 25
+            message = bot.send_message(message.chat.id, "Введите диапозон цен за день проживания. Пример 1000-9000")
+            bot.register_next_step_handler(message, price_range, day_difference, parameters)
+            return None
+
+        if not result:
+            raise NameError("Отели не найдены")
+
+        if len(result.keys()) < hotel_count:
+            bot.send_message(message.chat.id, "Отелей нашлось меньше чем надо =(")
+
+        if photo_answer == "y":
+            bot.send_message(message.chat.id, "Сколько фотографий вывести")
+            bot.register_next_step_handler(message, photo, result)
+        elif photo_answer == "n":
+            output_message = ""
+            for index in result.keys():
+                output_message += result[index][0] + "\n"
+            bot.send_message(message.chat.id, output_message)
+            logger.success(f"Юзеру №{message.chat.id} отправлен результат поиска отелей")
+
+        history_hotels = []
+        for value in result.values():
+            history_hotels.append(value[2])
+        add_search_history_city(message.chat.id, command, history_hotels)
+        logger.success(f"История запроса для Юзера №{message.chat.id} записана")
+    except NameError:
+        bot.send_message(message.chat.id, f"Отели по заданным параметрам не найдены. Введите новый запрос {command}")
+        logger.warning(f"Отели для Юзера №{message.chat.id} не найдены")
+    except TimeoutError:
+        bot.send_message(message.chat.id, "Сервер не даёт ответа, возможно он сломался. Повторите позже")
+        logger.error("Сервер не отвечает, проблема не в боте")
+
+
+def price_range(message: types.Message, day_difference: int, parameters: dict) -> None:
     """
     Функция принимает данные и проверяет корректность ввода пользователем данных о диапозоне цен
     для поиска отелей
@@ -153,12 +258,8 @@ def price_range(message: types.Message, data: list, parameters: dict) -> None:
         message: types.Message
             Сообщение с диапозоном цен
 
-        data : list
-            основные сведения необходимые для поиска отелей
-            data[0] - y|n ответ на вывод фотографий
-            data[1] - best название команды, требуется для записи в историю запросов
-            data[2] - число отелей для поиска
-            data[3] - id города в котором ищется отель
+        day_difference : int
+            количество дней от даты въезда до даты выезда
 
         parameters : dict
             установки для запроса в базу данных, передаются в следующую функцию
@@ -177,19 +278,18 @@ def price_range(message: types.Message, data: list, parameters: dict) -> None:
         if int(prices[0]) > int(prices[1]):
             raise ValueError
         else:
-            data.append(prices)
             bot.send_message(message.chat.id, "Укажите диапозон расстояния отеля от центра города.\nПример: 1.5-4")
-            bot.register_next_step_handler(message, distance_range, data, parameters)
+            bot.register_next_step_handler(message, distance_range, prices, day_difference, parameters)
 
     except ValueError:
         bot.send_message(message.chat.id, "Указано неверное значение диапозона цен, повторите ввод")
-        bot.register_next_step_handler(message, price_range, data, parameters)
+        bot.register_next_step_handler(message, price_range, parameters)
     except IndexError:
         bot.send_message(message.chat.id, "Указано неверное значение диапозона цен, повторите ввод")
-        bot.register_next_step_handler(message, price_range, data, parameters)
+        bot.register_next_step_handler(message, price_range, parameters)
 
 
-def distance_range(message: types.Message, data: list, parameters: dict):
+def distance_range(message: types.Message, prices: list, day_difference: int, parameters: dict):
     """
     Функция принимает данные и проверяет корректность ввода этих данных о диапозоне
     дистанции для поиска отелей с последующим выводом ответа для пользователя
@@ -199,26 +299,25 @@ def distance_range(message: types.Message, data: list, parameters: dict):
         message: types.Message
             Сообщение с диапозоном цен
 
-        data : list
-            основные сведения необходимые для поиска отелей
-            data[0] - y|n ответ на вывод фотографий
-            data[1] - best название команды, требуется для записи в историю запросов
-            data[2] - число отелей для вывода
-            data[3] - id города в котором ищется отель
-            data[4] - диапозон стоимости дня проживания
+        prices : list
+            информация о минимальной и максимальной цене
+
+        day_difference : int
+            количество дней от даты въезда до даты выезда
 
         parameters : dict
             установки для запроса в базу данных, передаются в следующую функцию
     """
 
     try:
+        photo_answer = url_and_parameters["photo"]
+        hotel_count = int(url_and_parameters["hotel_count"])
         distance = message.text
         if distance.find(","):
             distance = distance.replace(",", ".")
         distance = distance.split("-")
         min_distance = float(distance[0])
         max_distance = float(distance[1])
-        prices = data[4]
         min_price = prices[0]
         max_price = prices[1]
         parameters["priceMin"] = min_price
@@ -228,13 +327,12 @@ def distance_range(message: types.Message, data: list, parameters: dict):
         if not result:
             raise NameError("Отели не найдены")
 
-        hotel_count = int(data[2])
         keys = set([key for key in result.keys()])
         for key in keys:
             hotel_distance = result[key][2]["distance"].split(" ")
             hotel_distance = hotel_distance[0].replace(",", ".")
             hotel_distance = float(hotel_distance)
-            hotel_price = result[key][2]["cur_price"]
+            hotel_price = result[key][2]["cur_price"] / day_difference
             if min_distance > hotel_distance or hotel_distance > max_distance:
                 del result[key]
             elif min_price > hotel_price or max_price < hotel_price:
@@ -248,10 +346,10 @@ def distance_range(message: types.Message, data: list, parameters: dict):
         if len(result.keys()) < hotel_count:
             bot.send_message(message.chat.id, "Отелей нашлось меньше чем надо =(")
 
-        if data[0] == "y":
+        if photo_answer == "y":
             output_message = bot.send_message(message.chat.id, "Сколько фотографий вывести")
             bot.register_next_step_handler(output_message, photo, result)
-        elif data[0] == "n":
+        elif photo_answer == "n":
             output_message = ""
             for index in result.keys():
                 output_message += result[index][0] + "\n"
@@ -261,11 +359,14 @@ def distance_range(message: types.Message, data: list, parameters: dict):
         for value in result.values():
             history_hotels.append(value[2])
         add_search_history_city(message.chat.id, "/bestdeal", history_hotels)
+
     except ValueError:
         bot.send_message(message.chat.id, "Указано неверное значение дистанции, повторите ввод")
-        bot.register_next_step_handler(message, distance_range, data, parameters)
+        bot.register_next_step_handler(message, distance_range, prices, parameters)
+        logger.error(f"Юзер №{message.chat.id} ввел неверное значение дистанции")
     except NameError:
         bot.send_message(message.chat.id, f"Отели в городе не найдены. Введите новый запрос /bestdeal")
+        logger.warning(f"Отели по запросу Юзера №{message.chat.id} не найдены")
 
 
 def city(message: types.Message, city_command: str) -> None:
@@ -282,7 +383,7 @@ def city(message: types.Message, city_command: str) -> None:
         city_command : str
             команда использованная пользователем
     """
-
+    logger.success(f"Юзер №{message.chat.id} ввел город = {message.text}")
     result = find_city(message, city_command)
 
     if isinstance(result, tuple):
@@ -307,7 +408,7 @@ def hotel(message: types.Message, hotel_data: str) -> None:
             data[0] - id города
             data[1] - название команды
     """
-
+    logger.success(f"Юзер №{message.chat.id} ввел число отелей = {message.text}")
     data = hotel_data.split("|")
     id_city = data[0]
     command = data[1]
@@ -346,74 +447,82 @@ def photo(message: types.Message, photo_data: dict, error=False):
             photo_count = 5
         else:
             photo_count = int(message.text)
+            if photo_count > 10:
+                photo_count = 10
+                bot.send_message(message.chat.id, "Максимально допустимое число фотографий = 10")
+                logger.warning(f"Юзер №{message.chat.id} превысил количество фотографий на вывод")
+            logger.success(f"Юзер №{message.chat.id} ввел число фотографий = {message.text}")
         result = find_photo(photo_data, photo_count)
         for media in result:
             bot.send_media_group(message.chat.id, media)
+        logger.success(f"Юзеру №{message.chat.id} отправлены сообщения с фотографиями")
     except ValueError:
         bot.send_message(message.chat.id, "Введено не число, будет использовано стандартное значение")
-        time = datetime.today().strftime('%Y-%m-%d-%H-%M')
-        logger.debug(f"{time}: User input data is not number(photos)")
+        logger.warning(f"Юзер №{message.chat.id} ввел не число, используется стандартное значение для вывода")
         photo(message, photo_data, error=True)
 
 
 @bot.callback_query_handler(func=lambda call: call.data[0] in ["y", "n"])
-def callback_photo(call: types.CallbackQuery) -> None:
+def callback_data(call: types.CallbackQuery) -> None:
     """
-    Callback функция, обрабатывает нажатие на кнопки, касающиеся вывода фотографий
+    Callback функция, обрабатывает нажатие на кнопки с информацией об ответе,
+    data : list
+            основные сведения необходимые для поиска отелей
+            data[0] - y|n ответ на вывод фотографий
+            data[1] - best название команды, требуется для записи в историю запросов
+            data[2] - число отелей для поиска
+            data[3] - id города в котором ищется отель
     """
 
-    try:
-        check_in = datetime.today().strftime('%Y-%m-%d')
-        check_out = (datetime.today() + timedelta(days=1)).strftime('%Y-%m-%d')
-        data = call.data.split("|")
-        destination = data[3]
-        hotels_count = data[2]
-        parameters = url_and_parameters["parameters_casual"]
-        parameters["pageSize"] = hotels_count
-        parameters["destinationId"] = destination
-        parameters["checkIn"] = check_in
-        parameters["checkOut"] = check_out
+    data = call.data.split("|")
+    destination = data[3]
+    hotels_count = data[2]
+    url_and_parameters["parameters_casual"]["pageSize"] = hotels_count
+    url_and_parameters["parameters_casual"]["destinationId"] = destination
+    url_and_parameters["command"] = data[1]
+    url_and_parameters["photo"] = data[0]
+    logger.success(f"От Юзера №{call.message.chat.id} получен ответ по выводу фотографий")
+    dates(call.message)
 
-        if data[1] == "low":
-            parameters["sortOrder"] = "PRICE"
-            result = check_hotels(parameters)
-            command = "/lowprice"
-        elif data[1] == "high":
-            parameters["sortOrder"] = "PRICE_HIGHEST_FIRST"
-            result = check_hotels(parameters)
-            command = "/highprice"
-        elif data[1] == "best":
-            parameters["sortOrder"] = "PRICE"
-            parameters["pageSize"] = 25
-            message = bot.send_message(call.message.chat.id, "Введите диапозон цен. Пример 1000-9000")
-            bot.register_next_step_handler(message, price_range, data, parameters)
-            return None
 
-        if not result:
-            raise NameError("Отели не найдены")
+@bot.callback_query_handler(func=DetailedTelegramCalendar.func())
+def callback_calendar(call: types.CallbackQuery):
+    """
+    Callback функция, отвечает за выбор дат календаря
+    """
 
-        if data[0] == "y":
-            bot.send_message(call.message.chat.id, "Сколько фотографий вывести")
-            bot.register_next_step_handler(call.message, photo, result)
-        elif data[0] == "n":
-            output_message = ""
-            for index in result.keys():
-                output_message += result[index][0] + "\n"
-            bot.send_message(call.message.chat.id, output_message)
+    user_id = call.message.chat.id
+    result, key, step = DetailedTelegramCalendar().process(call.data)
+    if LSTEP[step] == "month":
+        choice = "месяц"
+    elif LSTEP[step] == "day":
+        choice = "день"
 
-        history_hotels = []
-        for value in result.values():
-            history_hotels.append(value[2])
-        add_search_history_city(call.message.chat.id, command, history_hotels)
+    if not result and key:
+        bot.edit_message_text(f"Выберите {choice}",
+                              call.message.chat.id,
+                              call.message.message_id,
+                              reply_markup=key)
+    elif result:
+        check = check_dates(user_id)
+        if check[1] == 1:
+            update_dates(user_id, date_in=str(result))
+            bot.edit_message_text(f"Выбранная дата: {result}",
+                                  call.message.chat.id,
+                                  call.message.message_id)
 
-    except NameError:
-        bot.send_message(call.message.chat.id, f"Отели в городе не найдены. Введите новый запрос {command}")
-        time = datetime.today().strftime('%Y-%m-%d-%H-%M')
-        logger.debug(f"{time}: Hotels not found")
-    except TimeoutError:
-        bot.send_message(call.message.chat.id, "Сервер не даёт ответа, возможно он сломался. Повторите позже")
-        time = datetime.today().strftime('%Y-%m-%d-%H-%M')
-        logger.debug(f"{time}: Server didn't respond, bad request")
+            calendar, step = DetailedTelegramCalendar().build()
+            bot.send_message(call.message.chat.id,
+                             f"Выберите дату выезда",
+                             reply_markup=calendar)
+            logger.success(f"Юзеру №{call.message.chat.id} отправлен календарь выезда")
+        elif check[1] == 2:
+            update_dates(user_id, date_out=result)
+            bot.edit_message_text(f"Выбранная дата: {result}",
+                                  call.message.chat.id,
+                                  call.message.message_id)
+            logger.success(f"Юзер №{call.message.chat.id} завершил выбор дат")
+            send_date(call.message)
 
 
 @bot.callback_query_handler(func=lambda call: call.data)
@@ -437,7 +546,7 @@ def not_command_message(message: types.Message) -> None:
             Сообщение отправленное от пользователя, боту.
             Является классом библиотеки telebot
     """
-
+    logger.success(f"Юзер №{message.from_user.id} ввел неизвестную боту команду или слово")
     bot.reply_to(message, "Мне не удается понять, что от меня требуется, используйте"
                           " команду /help для получения справки по моим возможностям")
 
