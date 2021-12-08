@@ -1,14 +1,6 @@
 import sqlite3
 from datetime import datetime
-from typing import List
-
-
-class User:
-    users = dict()
-
-    def __init__(self, user_id, user_name):
-        self.user_id = user_id
-        self.user_name = user_name
+from typing import List, Tuple
 
 
 def create_table() -> None:
@@ -20,7 +12,9 @@ def create_table() -> None:
     cursor = conn.cursor()
     cursor.execute("""CREATE TABLE IF NOT EXISTS users(
                 user_id INT unique,
-                user_name TEXT)
+                user_name TEXT,
+                date_in TEXT,
+                date_out TEXT)
         """)
     cursor.execute("""CREATE TABLE IF NOT EXISTS history(
                     user_id INT,
@@ -32,7 +26,7 @@ def create_table() -> None:
     conn.commit()
 
 
-def add_user(user: User) -> None:
+def add_user(user_id, user_name) -> None:
     """
     Добавляет пользователя в таблицу при выполнения условия,
     если условие не выполняется, то ничего не происходит
@@ -45,13 +39,84 @@ def add_user(user: User) -> None:
 
     conn = sqlite3.connect("database.db")
     cursor = conn.cursor()
-    user_info = [user.user_id, user.user_name]
+    user_info = [user_id, user_name, None, None]
     conn.commit()
-    cursor.execute(f"SELECT user_id FROM users WHERE user_id = {user.user_id}")
+    cursor.execute(f"SELECT user_id FROM users WHERE user_id = {user_id}")
     data = cursor.fetchone()
     if data is None:
-        cursor.execute("INSERT INTO users VALUES(?,?);", user_info)
+        cursor.execute("INSERT INTO users VALUES(?,?,?,?);", user_info)
         conn.commit()
+
+
+def get_dates(user_id: int) -> Tuple[str, str]:
+    """
+    Функция предназначена для получения кортежа с датами въезда и выезда из отеля
+
+    Parameters:
+    -------------
+        user_id : int
+            id пользователя
+
+    """
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+    cursor.execute(f"SELECT date_in, date_out FROM users WHERE user_id = {user_id}")
+    result = cursor.fetchone()
+    return result
+
+
+def update_dates(user_id: int, date_in: str = None, date_out : str = None) -> None:
+    """
+    Функция отвечает за принятие id пользователя, а также даты въезда и выезда
+    в последующем это записывается в базу данных по id пользователя, чтобы забрать
+    в функции get_dates
+
+    Parameters:
+    -------------
+        user_id : int
+            id пользователя, для нахождения в базе данных
+
+        date_in : str
+            дата въезда, принимается строкой, изначально None
+
+        date-out : str
+            дата выезда, принимается строкой, изначально None
+    """
+
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+    if date_in and date_out is not None:
+        cursor.execute(f"UPDATE users SET date_out = Null, date_in = Null WHERE user_id = {user_id}")
+        conn.commit()
+    elif date_in is not None:
+        cursor.execute(f"UPDATE users SET date_in = '{date_in}' WHERE user_id = {user_id}")
+        conn.commit()
+    elif date_out is not None:
+        cursor.execute(f"UPDATE users SET date_out = '{date_out}' WHERE user_id = {user_id}")
+        conn.commit()
+
+
+def check_dates(user_id: int) -> Tuple[bool, int]:
+    """
+    Функция предназначена для проверки наличия в базе данныйх по указанному id
+    записей даты въезда и выезда, и если значение None, то возвращает кортеж из False и числа
+
+    Parameters:
+    -------------
+        user_id : int
+            id пользователя
+    """
+
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+    cursor.execute(f"SELECT date_in FROM users WHERE user_id = {user_id}")
+    result_1 = cursor.fetchone()
+    cursor.execute(f"SELECT date_out FROM users WHERE user_id = {user_id}")
+    result_2 = cursor.fetchone()
+    if result_1[0] is None:
+        return True, 1
+    elif result_2[0] is None:
+        return True, 2
 
 
 def add_search_history_city(user_id: int, command: str, hotels: List[dict]) -> None:

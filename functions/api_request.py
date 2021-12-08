@@ -1,5 +1,4 @@
 import json
-import os
 import re
 from typing import List, Tuple
 
@@ -19,8 +18,6 @@ headers = {
     'x-rapidapi-host': "hotels4.p.rapidapi.com",
     'x-rapidapi-key': API_TOKEN
 }
-
-logger.add("logging.log")
 
 
 def find_city(message: types.Message, command: str) -> types.InlineKeyboardMarkup or Tuple[bool, str]:
@@ -77,8 +74,12 @@ def find_hotels(message: types.Message, destination: str, command: str, error=Fa
         if hotels_count.isalpha() and error is False:
             if int(hotels_count) > 10:
                 hotels_count = "10"
+                url_and_parameters["hotel_count"] = 10
+                logger.warning(f"Юзер №{message.chat.id} ввёл число отелей больше чем 10, замена числа на 10")
         elif error:
             hotels_count = "5"
+            url_and_parameters["hotel_count"] = 5
+        url_and_parameters["hotel_count"] = hotels_count
 
         buttons = types.InlineKeyboardMarkup()
         button_yes = types.InlineKeyboardButton(text='Да!', callback_data=f'y|{command}|{hotels_count}|{destination}')
@@ -86,8 +87,7 @@ def find_hotels(message: types.Message, destination: str, command: str, error=Fa
         buttons.add(button_yes, button_no)
         return buttons
     except ValueError:
-        time = datetime.today().strftime('%Y-%m-%d-%H-%M')
-        logger.debug(f"{time}: User input data is not number(hotels)")
+        logger.warning(f"Юзер №{message.chat.id} ввел не цифровое значение, будет использовано стандартное значение = 5")
         return False
 
 
@@ -260,6 +260,8 @@ def send_message(hotels: List[dict]) -> tuple:
         text = f"{name}\nРейтинг: {rating}\n" \
                f"Адрес: {place}\n" \
                f"Расстояние от центра: {distance}\n" \
-               f"Стоимость дня: {cost}\n"
+               f"Стоимость проживания: {cost}\n" \
+               f"Сайт бронирования\nhttps://ru.hotels.com/ho{hotel['id']}\n"
+
         hotels_text.append(text)
     return hotels_text, hotel_id

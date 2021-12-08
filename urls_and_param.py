@@ -19,5 +19,7 @@ urls = {
         },
         "url_city": "https://hotels4.p.rapidapi.com/locations/v2/search",
         "url_hotel": "https://hotels4.p.rapidapi.com/properties/list",
-        "url_photo": "https://hotels4.p.rapidapi.com/properties/get-hotel-photos"
+        "url_photo": "https://hotels4.p.rapidapi.com/properties/get-hotel-photos",
+        "command": None,
+        "photo": None
     }
