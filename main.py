@@ -9,7 +9,7 @@ from telegram_bot_calendar import DetailedTelegramCalendar, LSTEP
 from config import BOT_TOKEN
 from datetime import datetime, timedelta
 from database.database import add_user, add_search_history_city, get_dates
-from database.database import create_table, get_history, check_dates, update_dates
+from database.database import create_table, get_history, check_dates, update_dates, update_request
 from functions.api_request import check_hotels, find_city, find_hotels
 from functions.photo_sender import find_photo
 from urls_and_param import urls
@@ -162,8 +162,8 @@ def dates(message: types.Message):
         message : types.Message
             сообщение пользователя, требуется для отправки календаря по id пользователя
     """
-
-    calendar, step = DetailedTelegramCalendar().build()
+    min_date = datetime.date(datetime.now())
+    calendar, step = DetailedTelegramCalendar(min_date=min_date, locale="ru").build()
     bot.send_message(message.chat.id,
                      f"Выберите дату въезда",
                      reply_markup=calendar)
@@ -201,10 +201,12 @@ def send_date(message: types.Message):
             parameters["checkIn"] = check_in.strftime("%Y-%m-%d")
             parameters["checkOut"] = check_out.strftime("%Y-%m-%d")
 
-        update_dates(message.chat.id, 1, 1)
+        update_dates(message.chat.id, "1", "1")
+
         command = url_and_parameters["command"]
-        photo_answer = url_and_parameters["photo"]
-        hotel_count = int(url_and_parameters["hotel_count"])
+        sql_result = update_request(message.chat.id, request=1)
+        photo_answer = sql_result[1]
+        hotel_count = sql_result[0]
         if command == "low":
             parameters["sortOrder"] = "PRICE"
             result = check_hotels(parameters)
@@ -216,7 +218,7 @@ def send_date(message: types.Message):
         elif command == "best":
             parameters["sortOrder"] = "PRICE"
             parameters["pageSize"] = 25
-            message = bot.send_message(message.chat.id, "Введите диапозон цен. Пример 1000-9000")
+            message = bot.send_message(message.chat.id, "Введите диапозон цены за 1 день проживания. Пример 1000-9000")
             bot.register_next_step_handler(message, price_range, day_difference, parameters)
             return None
 
@@ -227,8 +229,7 @@ def send_date(message: types.Message):
             bot.send_message(message.chat.id, "Отелей нашлось меньше чем надо =(")
 
         if photo_answer == "y":
-            bot.send_message(message.chat.id, "Сколько фотографий вывести")
-            bot.register_next_step_handler(message, photo, result)
+            photo(message, result)
         elif photo_answer == "n":
             output_message = ""
             for index in result.keys():
@@ -311,8 +312,9 @@ def distance_range(message: types.Message, prices: list, day_difference: int, pa
     """
 
     try:
-        photo_answer = url_and_parameters["photo"]
-        hotel_count = int(url_and_parameters["hotel_count"])
+        sql_result = update_request(message.chat.id, request=1)
+        photo_answer = sql_result[1]
+        hotel_count = sql_result[0]
         distance = message.text
         if distance.find(","):
             distance = distance.replace(",", ".")
@@ -348,13 +350,18 @@ def distance_range(message: types.Message, prices: list, day_difference: int, pa
             bot.send_message(message.chat.id, "Отелей нашлось меньше чем надо =(")
 
         if photo_answer == "y":
-            output_message = bot.send_message(message.chat.id, "Сколько фотографий вывести")
-            bot.register_next_step_handler(output_message, photo, result)
+            photo(message, result)
         elif photo_answer == "n":
             output_message = ""
             for index in result.keys():
                 output_message += result[index][0] + "\n"
             bot.send_message(message.chat.id, output_message)
+            output_message = "/lowprice - вывод информации об отелях с самой низкой ценой по городу\n" \
+                             "/highprice - вывод информации об отелях с самой высокой ценой по городу\n" \
+                             "/bestdeal - вывод наиболее подходящих отелей по заданым параметрам\n" \
+                             "/history - вывод информации о ранее введеных запросах"
+            bot.send_message(message.chat.id, output_message)
+            logger.success(f"Юзеру №{message.chat.id} отправлено сообщение с командами")
 
         history_hotels = []
         for value in result.values():
@@ -385,6 +392,7 @@ def city(message: types.Message, city_command: str) -> None:
             команда использованная пользователем
     """
     logger.success(f"Юзер №{message.chat.id} ввел город = {message.text}")
+    update_request(message.chat.id)
     result = find_city(message, city_command)
 
     if isinstance(result, tuple):
@@ -422,7 +430,26 @@ def hotel(message: types.Message, hotel_data: str) -> None:
     bot.send_message(message.chat.id, "Произвести вывод фотографий отелей?", reply_markup=result)
 
 
-def photo(message: types.Message, photo_data: dict, error=False):
+def photo_number(message: types.Message, error: bool = False):
+    try:
+        if error:
+            photo_count = 5
+        else:
+            photo_count = int(message.text)
+            if photo_count > 10:
+                photo_count = 10
+                bot.send_message(message.chat.id, "Максимально допустимое число фотографий = 10")
+                logger.warning(f"Юзер №{message.chat.id} превысил количество фотографий на вывод")
+            logger.success(f"Юзер №{message.chat.id} ввел число фотографий = {message.text}")
+        update_request(message.chat.id, photos_count=photo_count)
+        dates(message)
+    except ValueError:
+        bot.send_message(message.chat.id, "Введено не число, будет использовано стандартное значение")
+        logger.warning(f"Юзер №{message.chat.id} ввел не число, используется стандартное значение для вывода")
+        photo_number(message, error=True)
+
+
+def photo(message: types.Message, photo_data: dict):
     """
     Функция отвечает за прием сообщения с количеством фотографий на вывод,
     а также словаря с информацией о найденых отелях.
@@ -442,25 +469,18 @@ def photo(message: types.Message, photo_data: dict, error=False):
             булевое значение отвечает за ошибку ввода пользователем числа фотографий для вывода
             изначально является False
     """
-
-    try:
-        if error:
-            photo_count = 5
-        else:
-            photo_count = int(message.text)
-            if photo_count > 10:
-                photo_count = 10
-                bot.send_message(message.chat.id, "Максимально допустимое число фотографий = 10")
-                logger.warning(f"Юзер №{message.chat.id} превысил количество фотографий на вывод")
-            logger.success(f"Юзер №{message.chat.id} ввел число фотографий = {message.text}")
-        result = find_photo(photo_data, photo_count)
-        for media in result:
-            bot.send_media_group(message.chat.id, media)
-        logger.success(f"Юзеру №{message.chat.id} отправлены сообщения с фотографиями")
-    except ValueError:
-        bot.send_message(message.chat.id, "Введено не число, будет использовано стандартное значение")
-        logger.warning(f"Юзер №{message.chat.id} ввел не число, используется стандартное значение для вывода")
-        photo(message, photo_data, error=True)
+    sql_result = update_request(message.chat.id, request=2)
+    photo_count = sql_result[0]
+    result = find_photo(photo_data, photo_count)
+    for media in result:
+        bot.send_media_group(message.chat.id, media)
+    logger.success(f"Юзеру №{message.chat.id} отправлены сообщения с фотографиями")
+    output_message = "/lowprice - вывод информации об отелях с самой низкой ценой по городу\n" \
+                     "/highprice - вывод информации об отелях с самой высокой ценой по городу\n" \
+                     "/bestdeal - вывод наиболее подходящих отелей по заданым параметрам\n" \
+                     "/history - вывод информации о ранее введеных запросах"
+    bot.send_message(message.chat.id, output_message)
+    logger.success(f"Юзеру №{message.chat.id} отправлено сообщение с командами")
 
 
 @bot.callback_query_handler(func=lambda call: call.data[0] in ["y", "n"])
@@ -477,13 +497,18 @@ def callback_data(call: types.CallbackQuery) -> None:
 
     data = call.data.split("|")
     destination = data[3]
-    hotels_count = data[2]
+    hotels_count = int(data[2])
     url_and_parameters["parameters_casual"]["pageSize"] = hotels_count
     url_and_parameters["parameters_casual"]["destinationId"] = destination
     url_and_parameters["command"] = data[1]
-    url_and_parameters["photo"] = data[0]
+    update_request(call.message.chat.id, hotels_count=hotels_count)
+    update_request(call.message.chat.id, answer=data[0])
     logger.success(f"От Юзера №{call.message.chat.id} получен ответ по выводу фотографий")
-    dates(call.message)
+    if data[0] == "y":
+        bot.send_message(call.message.chat.id, "Сколько фотографий вывести?")
+        bot.register_next_step_handler(call.message, photo_number)
+    if data[0] == "n":
+        dates(call.message)
 
 
 @bot.callback_query_handler(func=DetailedTelegramCalendar.func())
@@ -493,7 +518,15 @@ def callback_calendar(call: types.CallbackQuery):
     """
 
     user_id = call.message.chat.id
-    result, key, step = DetailedTelegramCalendar().process(call.data)
+    sql_result = check_dates(call.message.chat.id)
+    if sql_result[1] == 1:
+        min_date = datetime.date(datetime.now())
+        result, key, step = DetailedTelegramCalendar(min_date=min_date).process(call.data)
+    elif sql_result[1] == 2:
+        min_date = get_dates(call.message.chat.id)
+        min_date = datetime.date(datetime.strptime(min_date[0], "%Y-%m-%d"))
+        result, key, step = DetailedTelegramCalendar(min_date=min_date).process(call.data)
+
     if LSTEP[step] == "month":
         choice = "месяц"
     elif LSTEP[step] == "day":
@@ -511,8 +544,8 @@ def callback_calendar(call: types.CallbackQuery):
             bot.edit_message_text(f"Выбранная дата: {result}",
                                   call.message.chat.id,
                                   call.message.message_id)
-
-            calendar, step = DetailedTelegramCalendar().build()
+            max_date = result + timedelta(28)
+            calendar, step = DetailedTelegramCalendar(min_date=result, max_date=max_date).build()
             bot.send_message(call.message.chat.id,
                              f"Выберите дату выезда",
                              reply_markup=calendar)

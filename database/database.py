@@ -23,6 +23,12 @@ def create_table() -> None:
                     city TEXT,
                     hotels TEXT)  
             """)
+    cursor.execute("""CREATE TABLE IF NOT EXISTS parameters(
+                        user_id INT,
+                        hotel_count INT,
+                        photo_answer TEXT,
+                        photo_count INT)
+            """)
     conn.commit()
 
 
@@ -65,7 +71,7 @@ def get_dates(user_id: int) -> Tuple[str, str]:
     return result
 
 
-def update_dates(user_id: int, date_in: str = None, date_out : str = None) -> None:
+def update_dates(user_id: int, date_in: str = None, date_out: str = None) -> None:
     """
     Функция отвечает за принятие id пользователя, а также даты въезда и выезда
     в последующем это записывается в базу данных по id пользователя, чтобы забрать
@@ -190,3 +196,46 @@ def get_history(user_id: int) -> tuple:
         return message, history_count
     except ValueError:
         return False, 0
+
+
+def update_request(user_id: int, hotels_count: int = None, answer: str = None, photos_count: int = None,
+                   request: int = None):
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+    if hotels_count is not None:
+        cursor.execute(f"""UPDATE parameters SET hotel_count = {hotels_count} WHERE user_id = {user_id}""")
+        conn.commit()
+    elif answer is not None:
+        cursor.execute(f"""UPDATE parameters SET photo_answer = '{answer}' WHERE user_id = {user_id}""")
+        conn.commit()
+    elif photos_count is not None:
+        cursor.execute(f"""UPDATE parameters SET photo_count = {photos_count} WHERE user_id = {user_id}""")
+        conn.commit()
+    elif (hotels_count and answer and photos_count and request) is None:
+        cursor.execute(f"SELECT user_id FROM parameters WHERE user_id = {user_id}")
+        data = cursor.fetchone()
+        if data is None:
+            info = [user_id, None, None, None]
+            cursor.execute("INSERT INTO parameters VALUES(?,?,?,?);", info)
+            conn.commit()
+
+    if request is not None:
+        if request == 0:
+            cursor.execute(f"""UPDATE parameters SET
+                    hotel_count = Null,
+                    photo_answer = Null,
+                    photo_count = Null
+                    WHERE user_id = {user_id} """)
+            conn.commit()
+        if request == 1:
+            cursor.execute(f"""SELECT hotel_count, photo_answer FROM parameters WHERE user_id = {user_id}""")
+            result = cursor.fetchone()
+            return result
+        if request == 2:
+            cursor.execute(f"""SELECT photo_count FROM parameters WHERE user_id = {user_id}""")
+            result = cursor.fetchone()
+            return result
+
+
+
+

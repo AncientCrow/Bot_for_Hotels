@@ -21,5 +21,6 @@ urls = {
         "url_hotel": "https://hotels4.p.rapidapi.com/properties/list",
         "url_photo": "https://hotels4.p.rapidapi.com/properties/get-hotel-photos",
         "command": None,
-        "photo": None
+        "photo": None,
+        "photo_count": None
     }
