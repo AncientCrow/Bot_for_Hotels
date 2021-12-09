@@ -20,7 +20,6 @@ def create_table() -> None:
                     user_id INT,
                     command TEXT,
                     date TEXT,
-                    city TEXT,
                     hotels TEXT)  
             """)
     cursor.execute("""CREATE TABLE IF NOT EXISTS parameters(
