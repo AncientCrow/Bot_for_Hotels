@@ -145,11 +145,10 @@ def history(message: types.Message) -> None:
     elif 0 < result[1] < 3:
         text = "В базе данных  недостаточно ваших запросов, будет выведено меньше 3 запросов"
         bot.send_message(message.chat.id, text)
-        bot.send_message(message.chat.id, result[0])
+        bot.send_message(message.chat.id, result[0], parse_mode="HTML")
         logger.success(f"Команда /history выполнена, но у Юзера №{message.chat.id} меньше 3 запросов")
-
     else:
-        bot.send_message(message.chat.id, result[0])
+        bot.send_message(message.chat.id, result[0], parse_mode="HTML")
         logger.success(f"Команда /history от Юзера №{message.chat.id} выполнена")
 
 
@@ -239,7 +238,7 @@ def send_date(message: types.Message):
 
         history_hotels = []
         for value in result.values():
-            history_hotels.append(value[2])
+            history_hotels.append(value[0])
         add_search_history_city(message.chat.id, command, history_hotels)
         logger.success(f"История запроса для Юзера №{message.chat.id} записана")
     except NameError:
@@ -365,7 +364,7 @@ def distance_range(message: types.Message, prices: list, day_difference: int, pa
 
         history_hotels = []
         for value in result.values():
-            history_hotels.append(value[2])
+            history_hotels.append(value[0])
         add_search_history_city(message.chat.id, "/bestdeal", history_hotels)
 
     except ValueError:

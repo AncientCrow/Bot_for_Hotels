@@ -147,13 +147,11 @@ def add_search_history_city(user_id: int, command: str, hotels: List[dict]) -> N
     date = datetime.today().strftime('%Y-%m-%d-%H:%M')
     user_info = [user_id, command, date]
     hotels_add = []
-    for number, hotel in enumerate(hotels):
-        if number == 0:
-            user_info.append(hotel['locality'])
-        hotels_add.append(hotel['name'])
+    for hotel in hotels:
+        hotels_add.append(f"{hotel}|")
     hotels_add = ", ".join(hotels_add)
     user_info.append(hotels_add)
-    cursor.execute("INSERT INTO history VALUES(?,?,?,?,?);", user_info)
+    cursor.execute("INSERT INTO history VALUES(?,?,?,?);", user_info)
     conn.commit()
 
 
@@ -182,17 +180,18 @@ def get_history(user_id: int) -> tuple:
             rows = rows[::-1]
 
             message = ""
+            history_count = len(rows)
             for row in rows[:3]:
                 time = row[2]
                 command = row[1]
-                city = row[3]
-                hotels = row[4].split(", ")
+                hotels = row[3].split("|")
                 hotel_message = ""
-                history_count = len(hotels)
-                for hotel in hotels:
-                    hotel_message += f"{hotel}\n"
 
-                message += f"\nВремя запроса: {time}\nКоманда: {command}\nГород: {city}\nОтели:\n{hotel_message}\n"
+                for hotel in hotels:
+                    hotel = hotel.replace(", ", " ")
+                    hotel_message += f"{hotel}"
+
+                message += f"\n<b>Время запроса: {time}</b>\nКоманда: {command}\nОтели:\n{hotel_message}"
         return message, history_count
     except ValueError:
         return False, 0
@@ -235,7 +234,3 @@ def update_request(user_id: int, hotels_count: int = None, answer: str = None, p
             cursor.execute(f"""SELECT photo_count FROM parameters WHERE user_id = {user_id}""")
             result = cursor.fetchone()
             return result
-
-
-
-
