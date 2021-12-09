@@ -124,6 +124,7 @@ def check_dates(user_id: int) -> Tuple[bool, int]:
         return True, 2
 
 
+
 def add_search_history_city(user_id: int, command: str, hotels: List[dict]) -> None:
     """
     Функция отвечает за добавление истории запросов пользователя формата
