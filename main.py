@@ -2,15 +2,16 @@ import datetime
 import sqlite3
 import telebot
 
+from loguru import logger
+from telebot import types
+from telegram_bot_calendar import DetailedTelegramCalendar, LSTEP
+
 from config import BOT_TOKEN
 from datetime import datetime, timedelta
 from database.database import add_user, add_search_history_city, get_dates
 from database.database import create_table, get_history, check_dates, update_dates
 from functions.api_request import check_hotels, find_city, find_hotels
 from functions.photo_sender import find_photo
-from loguru import logger
-from telebot import types
-from telegram_bot_calendar import DetailedTelegramCalendar, LSTEP
 from urls_and_param import urls
 
 logger.add("logging.log", encoding="utf-8")
@@ -215,7 +216,7 @@ def send_date(message: types.Message):
         elif command == "best":
             parameters["sortOrder"] = "PRICE"
             parameters["pageSize"] = 25
-            message = bot.send_message(message.chat.id, "Введите диапозон цен за день проживания. Пример 1000-9000")
+            message = bot.send_message(message.chat.id, "Введите диапозон цен. Пример 1000-9000")
             bot.register_next_step_handler(message, price_range, day_difference, parameters)
             return None
 
